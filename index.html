@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Doctor Strange Mandala - Max Sparkles</title>
+<style>
+*{
+    margin:0;
+    padding:0;
+    box-sizing:border-box;
+}
+html,body{
+    width:100%;
+    height:100%;
+    overflow:hidden;
+    background:black;
+    font-family:sans-serif;
+}
+video{
+    position:absolute;
+    width:100%;
+    height:100%;
+    object-fit:cover;
+    transform:scaleX(-1);
+    display:block;
+}
+canvas{
+    position:absolute;
+    top:0;
+    left:0;
+    width:100%;
+    height:100%;
+    pointer-events:none;
+    z-index: 5;
+}
+#loading{
+    position:absolute;
+    top:50%;
+    left:50%;
+    transform:translate(-50%,-50%);
+    color: #ff9d00;
+    font-size:22px;
+    z-index:10;
+    text-shadow: 0 0 10px #ff6600;
+    font-weight: bold;
+}
+</style>
+</head>
+<body>
+
+<div id="loading">
+Loading Camera & Mystic Arcanum...
+</div>
+
+<video id="video" autoplay playsinline></video>
+<canvas id="output"></canvas>
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+<script>
+const video = document.getElementById("video");
+const canvas = document.getElementById("output");
+const ctx = canvas.getContext("2d");
+
+let handsData = [];
+let rotation = 0;
+let sparksArray = [];
+let currentShieldRadius = 120;
+
+// ===================================
+// HIGH-INTENSITY STREAK SPARK ENGINE
+// ===================================
+class Spark {
+    constructor(x, y, scaleFactor, customAngle = null) {
+        this.x = x;
+        this.y = y;
+        
+        // If a custom angle is passed (from the spinning rim), use it. Otherwise, randomize.
+        const angle = customAngle !== null ? customAngle : Math.random() * Math.PI * 2;
+        
+        // Fast dynamic speed multiplier
+        const speed = (Math.random() * 10 + 5) * scaleFactor; 
+        this.vx = Math.cos(angle) * speed;
+        this.vy = Math.sin(angle) * speed - (Math.random() * 3 * scaleFactor); // Dynamic upward drift
+        
+        this.alpha = 1;
+        // Slower decay means sparks live longer and travel further across the screen
+        this.decay = Math.random() * 0.03 + 0.015; 
+        this.size = (Math.random() * 2 + 1) * scaleFactor;
+    }
+    update() {
+        this.x += this.vx;
+        this.y += this.vy;
+        
+        // Gravity and heavy air friction simulation
+        this.vy += 0.08; 
+        this.vx *= 0.97; 
+        
+        this.alpha -= this.decay;
+    }
+    draw() {
+        ctx.save();
+        ctx.globalAlpha = this.alpha;
+        
+        ctx.strokeStyle = Math.random() > 0.5 ? '#ffffff' : '#ffaa00';
+        ctx.lineWidth = this.size;
+        ctx.shadowBlur = 10;
+        ctx.shadowColor = '#ff4500';
+        
+        // --- STREAK EFFECT ---
+        // Instead of drawing a dot, draw a line stretching from where the particle was to where it's going
+        ctx.beginPath();
+        ctx.moveTo(this.x, this.y);
+        ctx.lineTo(this.x - this.vx * 1.5, this.y - this.vy * 1.5);
+        ctx.stroke();
+        
+        ctx.restore();
+    }
+}
+
+function resize(){
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+}
+window.addEventListener("resize", resize);
+resize();
+
+const hands = new Hands({
+    locateFile: (file) => {
+        return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+    }
+});
+
+hands.setOptions({
+    maxNumHands: 2,
+    modelComplexity: 1,
+    minDetectionConfidence: 0.7,
+    minTrackingConfidence: 0.7
+});
+
+hands.onResults(results => {
+    handsData = results.multiHandLandmarks || [];
+    document.getElementById("loading").style.display = "none";
+});
+
+const camera = new Camera(video, {
+    onFrame: async () => {
+        await hands.send({ image: video });
+    },
+    width: 1280,
+    height: 720
+});
+camera.start();
+
+// =========================
+// MAIN ANIMATION LOOP
+// =========================
+function drawFrame() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    ctx.save();
+    ctx.translate(canvas.width, 0);
+    ctx.scale(-1, 1);
+
+    rotation += 0.02;
+
+    handsData.forEach(hand => {
+        const wrist = hand[0];
+        const indexBase = hand[5];
+        const middleBase = hand[9];
+        const ringBase = hand[13];
+        const pinkyBase = hand[17];
+        
+        const indexTip = hand[8];
+        const thumbTip = hand[4];
+
+        const cx = (wrist.x + indexBase.x + middleBase.x + ringBase.x + pinkyBase.x) / 5 * canvas.width;
+        const cy = (wrist.y + indexBase.y + middleBase.y + ringBase.y + pinkyBase.y) / 5 * canvas.height;
+
+        const dx = (indexBase.x - pinkyBase.x) * canvas.width;
+        const dy = (indexBase.y - pinkyBase.y) * canvas.height;
+        const handSpan = Math.sqrt(dx * dx + dy * dy);
+
+        currentShieldRadius = Math.max(40, Math.min(350, handSpan * 1.8));
+        const scaleFactor = currentShieldRadius / 140; 
+
+        // Draw dynamic shield (This spawns the rim sparks)
+        drawMagicCircle(cx, cy, currentShieldRadius, scaleFactor);
+
+        // Generate sparks at the finger tips
+        const tx = indexTip.x * canvas.width;
+        const ty = indexTip.y * canvas.height;
+        const thx = thumbTip.x * canvas.width;
+        const thy = thumbTip.y * canvas.height;
+
+        // Spawning 6 sparks per finger per frame for extreme density
+        for (let i = 0; i < 6; i++) {
+            sparksArray.push(new Spark(tx, ty, scaleFactor));
+            sparksArray.push(new Spark(thx, thy, scaleFactor));
+        }
+    });
+
+    // Process and draw all active sparkles
+    for (let i = sparksArray.length - 1; i >= 0; i--) {
+        sparksArray[i].update();
+        sparksArray[i].draw();
+        
+        // Remove dead particles so the performance stays butter smooth
+        if (sparksArray[i].alpha <= 0) {
+            sparksArray.splice(i, 1);
+        }
+    }
+
+    ctx.restore();
+    requestAnimationFrame(drawFrame);
+}
+
+// =========================
+// COMPOSITE SHIELD GEOMETRY
+// =========================
+function drawMagicCircle(x, y, r, scaleFactor){
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(rotation);
+
+    ctx.strokeStyle = "#ff9d00";
+    ctx.lineWidth = 3.5 * scaleFactor; 
+    ctx.shadowBlur = 25 * scaleFactor;
+    ctx.shadowColor = "#ff5500";
+
+    // --- HIGH DENSITY RIM EMITTER ---
+    // Spawns 12 sparks per frame directly flying off the spinning wheel's surface
+    for (let i = 0; i < 12; i++) {
+        const randomAngle = Math.random() * Math.PI * 2;
+        // Calculate point on circle path
+        const sparkX = x + Math.cos(randomAngle) * r;
+        const sparkY = y + Math.sin(randomAngle) * r;
+        
+        // Tangent angle offset makes them spin outward in the direction of rotation
+        const outboundAngle = randomAngle + (Math.PI / 2) + (Math.random() - 0.5);
+        
+        sparksArray.push(new Spark(sparkX, sparkY, scaleFactor, outboundAngle));
+    }
+
+    // Outer Circle Boundary
+    ctx.beginPath();
+    ctx.arc(0, 0, r, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Middle Textured Circle
+    ctx.save();
+    ctx.setLineDash([8 * scaleFactor, 12 * scaleFactor]);
+    ctx.beginPath();
+    ctx.arc(0, 0, r * 0.82, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+
+    // Inner Core Circle Ring
+    ctx.beginPath();
+    ctx.arc(0, 0, r * 0.45, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Sacred Geometry Star Matrix
+    ctx.save();
+    ctx.lineWidth = 1.5 * scaleFactor;
+    for(let i = 0; i < 3; i++) {
+        ctx.rotate(Math.PI / 3);
+        ctx.strokeRect(-r * 0.55, -r * 0.55, r * 1.1, r * 1.1);
+    }
+    ctx.restore();
+
+    // Radiating Magic Spikes
+    for(let i = 0; i < 16; i++){
+        const a = i * Math.PI / 8;
+        ctx.beginPath();
+        ctx.moveTo(Math.cos(a) * r * 0.45, Math.sin(a) * r * 0.45);
+        ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r);
+        ctx.stroke();
+    }
+
+    ctx.restore();
+}
+
+drawFrame();
+</script>
+
+</body>
+</html>
